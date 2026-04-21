@@ -166,6 +166,12 @@ export default function App() {
   const [sections,    setSections]    = useState({info:true,mutants:true,rad:true,anom:true,stashes:false})
   const [toast,       setToast]       = useState(null)
   const [radFilter,   setRadFilter]   = useState(new Set([1,2,3]))  // radiation tier filter
+  // editMode (radiation): null | { idx, draft }
+  const [editMode,    setEditMode]    = useState(null)
+  // zoneEditMode: null | { idx, draft:{name,pos,triggerRadius,despawnDistance} }
+  const [zoneEdit,    setZoneEdit]    = useState(null)
+  // contextMenu: null | { cx,cy,wx,wz }  (canvas px position + world coords)
+  const [ctxMenu,     setCtxMenu]     = useState(null)
 
   // ── Refs ────────────────────────────────────────────────────────────
   const tfm        = useRef({ x:0, y:0, scale:0.07 })
@@ -176,9 +182,9 @@ export default function App() {
 
   // keep render state current
   useEffect(() => {
-    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, selRect:null }
+    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit }
     mark()
-  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter])
+  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit])
 
   // ── Derived ─────────────────────────────────────────────────────────
   const tierList = useMemo(() =>
@@ -205,12 +211,6 @@ export default function App() {
     ))
     return m
   }, [zones])
-
-  // helper: is a spawnPoint visible given tierFilter
-  const spVisible = useCallback((sp) => {
-    if (!tierFilter) return true
-    return sp.tierIds.some(id => tierFilter.has(String(id)))
-  }, [tierFilter])
 
   // ── Clear inspected when its layer turns off ──────────────────────────
   useEffect(() => {
@@ -448,6 +448,75 @@ export default function App() {
       })
     }
 
+
+    // ── Edit mode: draw draft radiation zone on top
+    const EM = rs.editMode
+    if (EM) {
+      const d = EM.draft
+      const ep = wToP(d.pos.x, d.pos.z)
+      const er = Math.max(d.radius * ppu, 3/sc)
+      const ec = d.rt.color
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, er, 0, Math.PI*2)
+      ctx.fillStyle = hexA(ec, 0.18); ctx.strokeStyle = ec
+      ctx.lineWidth = 2.5/sc; ctx.setLineDash([14/sc,7/sc])
+      ctx.fill(); ctx.stroke(); ctx.setLineDash([])
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, er*0.28, 0, Math.PI*2)
+      ctx.fillStyle = hexA(ec, 0.45); ctx.fill()
+      const cs = Math.max(14/sc, 5)
+      ctx.strokeStyle = ec; ctx.lineWidth = 1.5/sc
+      ctx.beginPath()
+      ctx.moveTo(ep.x-cs, ep.y); ctx.lineTo(ep.x+cs, ep.y)
+      ctx.moveTo(ep.x, ep.y-cs); ctx.lineTo(ep.x, ep.y+cs)
+      ctx.stroke()
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, Math.max(8/sc, 3), 0, Math.PI*2)
+      ctx.fillStyle = ec; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1/sc; ctx.fill(); ctx.stroke()
+      if (sc > 0.07) {
+        const fs = Math.max(12/sc, 8)
+        ctx.font = `bold ${fs}px monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+        ctx.strokeStyle='rgba(0,0,0,0.85)'; ctx.lineWidth=3/sc
+        ctx.strokeText(`[EDIT] ${d.name}`, ep.x, ep.y - er - 6/sc)
+        ctx.fillStyle = ec; ctx.fillText(`[EDIT] ${d.name}`, ep.x, ep.y - er - 6/sc)
+        ctx.font = `${Math.max(10/sc,7)}px monospace`; ctx.textBaseline='middle'; ctx.textAlign='left'
+        ctx.strokeText(`r=${d.radius}m`, ep.x+er+8/sc, ep.y)
+        ctx.fillStyle = hexA(ec,0.9); ctx.fillText(`r=${d.radius}m`, ep.x+er+8/sc, ep.y)
+      }
+    }
+
+    // ── Zone edit preview: trigger + despawn rings with drag handle
+    const ZE = rs.zoneEdit
+    if (ZE) {
+      const d = ZE.draft
+      const ep = wToP(d.pos.x, d.pos.z)
+      // Despawn ring
+      const rd = Math.max(d.despawnDistance * ppu, 3/sc)
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, rd, 0, Math.PI*2)
+      ctx.fillStyle='rgba(250,204,21,0.06)'; ctx.strokeStyle='rgba(250,204,21,0.6)'
+      ctx.lineWidth=2/sc; ctx.setLineDash([12/sc,6/sc]); ctx.fill(); ctx.stroke(); ctx.setLineDash([])
+      // Trigger ring
+      const rt2 = Math.max(d.triggerRadius * ppu, 3/sc)
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, rt2, 0, Math.PI*2)
+      ctx.fillStyle='rgba(148,163,184,0.1)'; ctx.strokeStyle='#94a3b8'
+      ctx.lineWidth=2/sc; ctx.setLineDash([10/sc,5/sc]); ctx.fill(); ctx.stroke(); ctx.setLineDash([])
+      // Center crosshair + handle
+      const cs2 = Math.max(14/sc, 5)
+      ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1.5/sc
+      ctx.beginPath(); ctx.moveTo(ep.x-cs2,ep.y); ctx.lineTo(ep.x+cs2,ep.y)
+      ctx.moveTo(ep.x,ep.y-cs2); ctx.lineTo(ep.x,ep.y+cs2); ctx.stroke()
+      ctx.beginPath(); ctx.arc(ep.x, ep.y, Math.max(8/sc,3), 0, Math.PI*2)
+      ctx.fillStyle='#94a3b8'; ctx.strokeStyle='rgba(0,0,0,0.6)'; ctx.lineWidth=1/sc; ctx.fill(); ctx.stroke()
+      // Label
+      if (sc > 0.07) {
+        const fs = Math.max(12/sc, 8)
+        ctx.font=`bold ${fs}px monospace`; ctx.textAlign='center'; ctx.textBaseline='bottom'
+        ctx.strokeStyle='rgba(0,0,0,0.85)'; ctx.lineWidth=3/sc
+        ctx.strokeText(`[EDIT] ${d.name}`, ep.x, ep.y - rt2 - 6/sc)
+        ctx.fillStyle='#94a3b8'; ctx.fillText(`[EDIT] ${d.name}`, ep.x, ep.y - rt2 - 6/sc)
+        ctx.font=`${Math.max(10/sc,7)}px monospace`; ctx.textBaseline='middle'; ctx.textAlign='left'
+        ctx.strokeText(`T:${d.triggerRadius}m  D:${d.despawnDistance}m`, ep.x+rt2+8/sc, ep.y)
+        ctx.fillStyle='rgba(148,163,184,0.9)'; ctx.fillText(`T:${d.triggerRadius}m  D:${d.despawnDistance}m`, ep.x+rt2+8/sc, ep.y)
+      }
+    }
+
     // ── Drag-select rectangle
     if (SR) {
       const rx=Math.min(SR.x1,SR.x2),ry=Math.min(SR.y1,SR.y2)
@@ -557,6 +626,64 @@ export default function App() {
     const ds=dragState.current
     ds.hasMoved=false
 
+    // ── Shift+LMB → open context menu at clicked world position
+    if(e.shiftKey && toolRef.current==='pan') {
+      e.preventDefault()
+      const ip=cpToImg(cp.x,cp.y)
+      const wc=pToW(ip.x,ip.y)
+      setCtxMenu({ cx:cp.x, cy:cp.y, wx:wc.x, wz:wc.z })
+      return
+    }
+
+    // ── Zone-edit drag (move spawn zone center)
+    if(RS.current.zoneEdit) {
+      const ze=RS.current.zoneEdit
+      const ip=cpToImg(cp.x,cp.y)
+      const ep=wToP(ze.draft.pos.x,ze.draft.pos.z)
+      const ppu2=W.imgW/(W.xMax-W.xMin)
+      const hitR=Math.max(16/tfm.current.scale,ze.draft.triggerRadius*ppu2*0.5)
+      if(Math.hypot(ip.x-ep.x,ip.y-ep.y)<hitR){
+        ds.active=true; ds.type='zoneDrag'
+        ds.editOffset={dx:ip.x-ep.x,dy:ip.y-ep.y}
+        const onMoveZ=ev=>{
+          const rz=canvasRef.current?.getBoundingClientRect(); if(!rz) return
+          const ip2=cpToImg(ev.clientX-rz.left,ev.clientY-rz.top)
+          const wc2=pToW(ip2.x-ds.editOffset.dx,ip2.y-ds.editOffset.dy)
+          setZoneEdit(prev=>prev?({...prev,draft:{...prev.draft,pos:{x:+wc2.x.toFixed(3),z:+wc2.z.toFixed(3)}}}):null)
+          setCursor({x:+wc2.x.toFixed(1),z:+wc2.z.toFixed(1)})
+        }
+        const onUpZ=()=>{window.removeEventListener('mousemove',onMoveZ);window.removeEventListener('mouseup',onUpZ);ds.active=false}
+        window.addEventListener('mousemove',onMoveZ); window.addEventListener('mouseup',onUpZ)
+        return
+      }
+    }
+
+    // ── Edit mode: drag zone center ──────────────────────────────────────
+    if(RS.current.editMode) {
+      const em = RS.current.editMode
+      const ip = cpToImg(cp.x,cp.y)
+      const p  = wToP(em.draft.pos.x, em.draft.pos.z)
+      const ppu= W.imgW/(W.xMax-W.xMin)
+      const handleR = Math.max(16/tfm.current.scale, em.draft.radius*ppu*0.5)
+      // If click is within handle radius → start drag
+      if(Math.hypot(ip.x-p.x, ip.y-p.y) < handleR) {
+        ds.active=true; ds.type='editDrag'
+        ds.editOffset={ dx: ip.x-p.x, dy: ip.y-p.y }
+        const onMove2=e2=>{
+          const r2=canvasRef.current?.getBoundingClientRect(); if(!r2) return
+          const cx2=e2.clientX-r2.left, cy2=e2.clientY-r2.top
+          const ip2=cpToImg(cx2,cy2)
+          const wc=pToW(ip2.x-ds.editOffset.dx, ip2.y-ds.editOffset.dy)
+          // Update draft pos
+          setEditMode(prev=>prev?({...prev,draft:{...prev.draft,pos:{x:+wc.x.toFixed(3),z:+wc.z.toFixed(3)}}}):null)
+          setCursor({x:+wc.x.toFixed(1),z:+wc.z.toFixed(1)})
+        }
+        const onUp2=()=>{ window.removeEventListener('mousemove',onMove2); window.removeEventListener('mouseup',onUp2); ds.active=false }
+        window.addEventListener('mousemove',onMove2); window.addEventListener('mouseup',onUp2)
+        return
+      }
+    }
+
     if(toolRef.current==='select') {
       const ip=cpToImg(cp.x,cp.y)
       ds.active=true; ds.type='select'; ds.selStart=ip
@@ -575,8 +702,6 @@ export default function App() {
 
       if(!ds.active) return
       if(ds.type==='pan'){
-        const dx=e.clientX-r.left-ds.panStart.mx+ds.panStart.mx-(e.clientX-r.left-ds.panStart.mx+(ds.panStart.mx-(e.clientX-r.left)))
-        // simplified:
         const mx=e.clientX-r.left, my=e.clientY-r.top
         if(Math.hypot(mx-ds.panStart.mx,my-ds.panStart.my)>3) ds.hasMoved=true
         tfm.current.x=ds.panStart.tx+(mx-ds.panStart.mx)
@@ -697,6 +822,142 @@ export default function App() {
       return next
     })
   }
+  // ── Edit mode helpers ──────────────────────────────────────────────────
+  const startEdit = useCallback(rad => {
+    // Find index in radiation array
+    setRadiation(prev => {
+      const idx = prev.findIndex(r => r === rad || (r.name===rad.name && r.pos.x===rad.pos.x && r.pos.z===rad.pos.z))
+      setEditMode({ idx, draft: { ...rad, pos:{...rad.pos} } })
+      setInspected(null)
+      setSections(s=>({...s,info:true}))
+      return prev
+    })
+  },[])
+
+  const updateDraft = useCallback(patch => {
+    setEditMode(prev => {
+      if(!prev) return null
+      const d = { ...prev.draft, ...patch }
+      // Recalculate rt when intensity changes
+      if(patch.intensityMax !== undefined || patch.intensityMin !== undefined) {
+        d.rt = radTier(d.intensityMax)
+      }
+      return { ...prev, draft: d }
+    })
+  },[])
+
+  const saveEdit = useCallback(() => {
+    setEditMode(prev => {
+      if(!prev) return null
+      setRadiation(rads => rads.map((r,i) => i===prev.idx ? {...r,...prev.draft, rt:radTier(prev.draft.intensityMax)} : r))
+      return null
+    })
+    showToast('Zone gespeichert ✓')
+  },[showToast])
+
+  const cancelEdit = useCallback(() => { setEditMode(null) },[])
+
+  const exportRadiation = useCallback(() => {
+    const exportArr = radiation.map(r => {
+      const raw = {...(r.raw||{})}
+      // Update fields in raw with current values
+      const posStr = `${r.pos.x.toFixed(6)} 0 ${r.pos.z.toFixed(6)}`
+      // Determine which position key the original used
+      const posKey = Object.keys(raw).find(k=>['radiationcenter','radiationCenter','center','position'].includes(k.toLowerCase())) || 'radiationCenter'
+      raw[posKey] = posStr
+      // Update radius — use same key as original
+      const radKey = Object.keys(raw).find(k=>['triggerradius','triggerRadius','radius','radiationradius','radiationRadius'].includes(k.toLowerCase())) || 'triggerRadius'
+      raw[radKey] = r.radius
+      raw.intensityMin = r.intensityMin
+      raw.intensityMax = r.intensityMax
+      return raw
+    })
+    const blob = new Blob([JSON.stringify(exportArr, null, 2)], {type:'application/json'})
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob)
+    a.download='RadiationZones_edited.json'; a.click()
+    showToast('JSON exportiert')
+  },[radiation, showToast])
+
+  // ── Zone edit helpers ─────────────────────────────────────────────────
+  const startZoneEdit = useCallback(zone => {
+    setZones(prev => {
+      const idx = prev.findIndex(z => z.name===zone.name && z.pos.x===zone.pos.x && z.pos.z===zone.pos.z)
+      setZoneEdit({ idx, draft:{ name:zone.name, pos:{...zone.pos}, triggerRadius:zone.triggerRadius, despawnDistance:zone.despawnDistance } })
+      setInspected(null)
+      setSections(s=>({...s,info:true}))
+      return prev
+    })
+  },[])
+
+  const updateZoneDraft = useCallback(patch => {
+    setZoneEdit(prev => prev ? {...prev, draft:{...prev.draft,...patch}} : null)
+  },[])
+
+  const saveZoneEdit = useCallback(() => {
+    setZoneEdit(prev => {
+      if(!prev) return null
+      setZones(zs => zs.map((z,i) => i===prev.idx
+        ? {...z, pos:{...prev.draft.pos}, triggerRadius:prev.draft.triggerRadius, despawnDistance:prev.draft.despawnDistance}
+        : z
+      ))
+      return null
+    })
+    showToast('Zone gespeichert ✓')
+  },[showToast])
+
+  const cancelZoneEdit = useCallback(() => setZoneEdit(null),[])
+
+  const exportZones = useCallback(() => {
+    const exportArr = zones.map(z => ({
+      name: z.name,
+      enabled: z.enabled ? 1 : 0,
+      position: `${z.pos.x.toFixed(6)} 0 ${z.pos.z.toFixed(6)}`,
+      triggerRadius: z.triggerRadius,
+      spawnChance: z.spawnChance,
+      despawnDistance: z.despawnDistance,
+      spawnPoints: z.spawnPoints.map(sp => ({
+        position: `${sp.pos.x.toFixed(6)} 0 ${sp.pos.z.toFixed(6)}`,
+        radius: sp.radius,
+        tierIds: sp.tierIds.map(Number),
+        entities: sp.entities,
+        useFixedHeight: 1,
+      })),
+    }))
+    const blob = new Blob([JSON.stringify(exportArr,null,2)],{type:'application/json'})
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob)
+    a.download='Zones_edited.json'; a.click()
+    showToast('Zones.json exportiert')
+  },[zones,showToast])
+
+  // ── Add radiation zone at world position ───────────────────────────────
+  const addRadiationZone = useCallback((wx,wz) => {
+    const auto = `RadZone_${String(radiation.length+1).padStart(3,'0')}`
+    const newRad = {
+      name: auto,
+      pos: { x:+wx.toFixed(3), z:+wz.toFixed(3) },
+      radius: 200,
+      intensityMin: 10,
+      intensityMax: 50,
+      rt: radTier(50),
+      raw: {
+        name: auto,
+        radiationCenter: `${wx.toFixed(6)} 20.000000 ${wz.toFixed(6)}`,
+        triggerRadius: 200,
+        intensityMin: 10,
+        intensityMax: 50,
+      },
+    }
+    setRadiation(prev => {
+      const next = [...prev, newRad]
+      // Open edit mode for the new zone immediately
+      setEditMode({ idx: next.length-1, draft:{...newRad, pos:{...newRad.pos}} })
+      setSections(s=>({...s,info:true}))
+      return next
+    })
+    setCtxMenu(null)
+    showToast(`${auto} hinzugefügt`)
+  },[radiation, showToast])
+
   const toggleLayer = k => setLayers(l=>({...l,[k]:!l[k]}))
   const toggleSec   = k => setSections(s=>({...s,[k]:!s[k]}))
   const toggleRadFilter = tier => setRadFilter(prev=>{ const n=new Set(prev); n.has(tier)?n.delete(tier):n.add(tier); return n })
@@ -750,6 +1011,12 @@ export default function App() {
           <TBtn active={tool==='pan'}    onClick={()=>setTool('pan')}>✋ Pan</TBtn>
           <TBtn active={tool==='select'} onClick={()=>setTool('select')}>⬚ Auswahl</TBtn>
         </div>
+        {/* Unsaved edit indicator */}
+        {(editMode||zoneEdit)&&(
+          <div style={{padding:'3px 12px',background:'rgba(249,115,22,0.1)',borderBottom:'1px solid rgba(249,115,22,0.3)',fontSize:9,color:'#f97316',letterSpacing:1,display:'flex',alignItems:'center',gap:5}}>
+            <span>●</span><span>Ungespeicherte Änderungen</span>
+          </div>
+        )}
         {selectedIds&&(
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'3px 12px',background:'#080d16',fontSize:10}}>
             <span style={{color:'#60a5fa'}}>{selectedIds.size} Zonen selektiert</span>
@@ -759,6 +1026,115 @@ export default function App() {
 
         {/* Scroll body */}
         <div style={S.scroll}>
+
+          {/* ── Edit Mode Panel ── */}
+          {editMode&&(()=>{
+            const d = editMode.draft
+            const c = d.rt.color
+            return (
+              <div style={{border:`1px solid ${c}`,borderRadius:4,margin:'0 0 6px',overflow:'hidden'}}>
+                <div style={{background:hexA(c,0.15),padding:'7px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <span style={{fontSize:11,color:c,fontFamily:'monospace',letterSpacing:1}}>✏ EDIT: {d.name}</span>
+                  <button onClick={cancelEdit} style={{background:'none',border:'none',color:c,cursor:'pointer',fontSize:11,fontFamily:'monospace'}}>✕</button>
+                </div>
+                <div style={{padding:'8px 10px',background:'#080e16'}}>
+                  <div style={{fontSize:9,color:'#2a3040',marginBottom:8,padding:'4px 6px',border:'1px solid #0d1521',borderRadius:2}}>
+                    ✋ Mittelpunkt auf Karte ziehen
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                    <div style={{fontSize:9,color:'#3d4a5e'}}>X: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.x.toFixed(1)}</span></div>
+                    <div style={{fontSize:9,color:'#3d4a5e'}}>Z: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.z.toFixed(1)}</span></div>
+                  </div>
+                  <div style={{marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                      <span style={{fontSize:9,color:'#3d4a5e',letterSpacing:1}}>RADIUS</span>
+                      <span style={{fontSize:10,color:c,fontFamily:'monospace'}}>{d.radius} m</span>
+                    </div>
+                    <input type="range" min="5" max="2000" step="5" value={d.radius}
+                      onChange={e=>updateDraft({radius:+e.target.value})}
+                      style={{width:'100%',accentColor:c,cursor:'pointer'}}/>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:8,color:'#1e2538',marginTop:2}}>
+                      <span>5m</span><span>2000m</span>
+                    </div>
+                  </div>
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:9,color:'#3d4a5e',letterSpacing:1,marginBottom:6}}>INTENSITÄT (mSv)</div>
+                    {[['Min',d.intensityMin,'intensityMin'],['Max',d.intensityMax,'intensityMax']].map(([lbl,val,key])=>(
+                      <div key={key} style={{display:'flex',alignItems:'center',gap:5,marginBottom:5}}>
+                        <span style={{fontSize:9,color:'#3d4a5e',minWidth:24}}>{lbl}</span>
+                        <button onClick={()=>updateDraft({[key]:Math.max(0,val-10)})}
+                          style={{width:22,height:22,background:'#0f1521',border:'1px solid #1a2030',color:'#4a5568',cursor:'pointer',borderRadius:2,fontFamily:'monospace',fontSize:13,lineHeight:1,padding:0}}>−</button>
+                        <input type="number" value={val} min="0" max="9999"
+                          onChange={e=>updateDraft({[key]:+e.target.value})}
+                          style={{flex:1,background:'#0b1018',border:`1px solid ${hexA(c,0.3)}`,color:'#7a9ab0',fontFamily:'monospace',fontSize:10,padding:'2px 5px',borderRadius:2,textAlign:'center'}}/>
+                        <button onClick={()=>updateDraft({[key]:val+10})}
+                          style={{width:22,height:22,background:'#0f1521',border:'1px solid #1a2030',color:'#4a5568',cursor:'pointer',borderRadius:2,fontFamily:'monospace',fontSize:13,lineHeight:1,padding:0}}>+</button>
+                      </div>
+                    ))}
+                    <div style={{padding:'3px 6px',borderRadius:2,background:hexA(d.rt.color,0.1),border:`1px solid ${hexA(d.rt.color,0.3)}`,fontSize:9,color:d.rt.color,marginTop:4}}>
+                      → {d.rt.label}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:5}}>
+                    <button onClick={saveEdit} style={{flex:1,padding:'6px',background:'#22c55e',border:'none',borderRadius:3,color:'#000',fontSize:11,cursor:'pointer',fontFamily:'monospace',fontWeight:700}}>
+                      ✓ Speichern
+                    </button>
+                    <button onClick={cancelEdit} style={{padding:'6px 10px',background:'#0f1521',border:'1px solid #1a2030',borderRadius:3,color:'#4a5568',fontSize:11,cursor:'pointer',fontFamily:'monospace'}}>
+                      Abbrechen
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Zone Edit Panel ── */}
+          {zoneEdit&&(()=>{
+            const d=zoneEdit.draft
+            return (
+              <div style={{border:'1px solid #94a3b8',borderRadius:4,margin:'0 0 6px',overflow:'hidden'}}>
+                <div style={{background:'rgba(148,163,184,0.12)',padding:'7px 10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <span style={{fontSize:11,color:'#94a3b8',fontFamily:'monospace',letterSpacing:1}}>✏ ZONE: {d.name}</span>
+                  <button onClick={cancelZoneEdit} style={{background:'none',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:11,fontFamily:'monospace'}}>✕</button>
+                </div>
+                <div style={{padding:'8px 10px',background:'#080e16'}}>
+                  <div style={{fontSize:9,color:'#2a3040',marginBottom:8,padding:'4px 6px',border:'1px solid #0d1521',borderRadius:2}}>
+                    ✋ Mittelpunkt auf Karte ziehen
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                    <div style={{fontSize:9,color:'#3d4a5e'}}>X: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.x.toFixed(1)}</span></div>
+                    <div style={{fontSize:9,color:'#3d4a5e'}}>Z: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.z.toFixed(1)}</span></div>
+                  </div>
+                  {/* Trigger radius slider */}
+                  {[
+                    {key:'triggerRadius',  label:'TRIGGER-RADIUS',  val:d.triggerRadius,  min:1,  max:500,  step:1,  col:'#94a3b8'},
+                    {key:'despawnDistance',label:'DESPAWN-RADIUS',  val:d.despawnDistance,min:10, max:2000, step:10, col:'#facc15'},
+                  ].map(({key,label,val,min,max,step,col})=>(
+                    <div key={key} style={{marginBottom:10}}>
+                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                        <span style={{fontSize:9,color:'#3d4a5e',letterSpacing:1}}>{label}</span>
+                        <span style={{fontSize:10,color:col,fontFamily:'monospace'}}>{val} m</span>
+                      </div>
+                      <input type="range" min={min} max={max} step={step} value={val}
+                        onChange={e=>updateZoneDraft({[key]:+e.target.value})}
+                        style={{width:'100%',accentColor:col,cursor:'pointer'}}/>
+                      <div style={{display:'flex',justifyContent:'space-between',fontSize:8,color:'#1e2538',marginTop:2}}>
+                        <span>{min}m</span><span>{max}m</span>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{display:'flex',gap:5}}>
+                    <button onClick={saveZoneEdit} style={{flex:1,padding:'6px',background:'#4ade80',border:'none',borderRadius:3,color:'#000',fontSize:11,cursor:'pointer',fontFamily:'monospace',fontWeight:700}}>
+                      ✓ Speichern
+                    </button>
+                    <button onClick={cancelZoneEdit} style={{padding:'6px 10px',background:'#0f1521',border:'1px solid #1a2030',borderRadius:3,color:'#4a5568',fontSize:11,cursor:'pointer',fontFamily:'monospace'}}>
+                      Abbrechen
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Info Panel — renders for zone / radiation / anomaly */}
           {inspected&&(()=>{
@@ -778,6 +1154,9 @@ export default function App() {
                   <IRow label="TriggerR"    val={`${d.triggerRadius} m`}/>
                   <IRow label="DespawnR"    val={`${d.despawnDistance} m`}/>
                   <IRow label="SpawnPoints" val={d.spawnPoints.length}/>
+                  <button onClick={()=>startZoneEdit(d)} style={{marginTop:8,marginBottom:6,width:'100%',padding:'5px',background:'#1a2030',border:'1px solid #94a3b8',borderRadius:3,color:'#94a3b8',fontSize:11,cursor:'pointer',fontFamily:'monospace',letterSpacing:1}}>
+                    ✏ ZONE BEARBEITEN
+                  </button>
                   {d.spawnPoints.length>0&&<>
                     <div style={S.miniLbl}>SPAWN-PUNKTE ({d.spawnPoints.length})</div>
                     <div style={{maxHeight:150,overflowY:'auto',borderLeft:'2px solid #1a2030',paddingLeft:6}}>
@@ -810,6 +1189,9 @@ export default function App() {
                   <div style={{marginTop:6,padding:'4px 6px',borderRadius:2,background:hexA(d.rt?.color||'#22c55e',0.12),border:`1px solid ${hexA(d.rt?.color||'#22c55e',0.3)}`,fontSize:10,color:d.rt?.color||'#22c55e'}}>
                     {d.rt?.tier===1?'Tier-1 Maske ausreichend':d.rt?.tier===2?'Tier-2 Maske erforderlich':'Tier-3 Maske erforderlich'}
                   </div>
+                  <button onClick={()=>startEdit(d)} style={{marginTop:8,width:'100%',padding:'5px',background:'#1a2030',border:'1px solid #f97316',borderRadius:3,color:'#f97316',fontSize:11,cursor:'pointer',fontFamily:'monospace',letterSpacing:1}}>
+                    ✏ ZONE BEARBEITEN
+                  </button>
                 </>}
 
                 {/* Static Anomaly */}
@@ -876,6 +1258,11 @@ export default function App() {
                 })}
               </div>
             </>}
+            <div style={{display:'flex',gap:5,marginBottom:4}}>
+              <button onClick={exportZones} style={{flex:1,padding:'5px',background:'#0f1521',border:'1px solid #4ade80',borderRadius:3,color:'#4ade80',fontSize:10,cursor:'pointer',fontFamily:'monospace'}}>
+                ↓ Zones.json exportieren
+              </button>
+            </div>
             <div style={S.stat}>
               {visibleSPCount}/{totalSpawnPoints} SpawnPts · {zones.length} Zonen
             </div>
@@ -903,6 +1290,11 @@ export default function App() {
                 </div>
               )
             })}
+            <div style={{display:'flex',gap:5,marginBottom:6}}>
+              <button onClick={exportRadiation} style={{flex:1,padding:'5px',background:'#0f1521',border:'1px solid #22c55e',borderRadius:3,color:'#22c55e',fontSize:10,cursor:'pointer',fontFamily:'monospace'}}>
+                ↓ JSON exportieren
+              </button>
+            </div>
             <div style={S.stat}>{radiation.length} Zonen geladen</div>
           </Coll>
 
@@ -927,7 +1319,7 @@ export default function App() {
       </div>
 
       {/* ═══ MAP ═══ */}
-      <div ref={containerRef} style={{flex:1,position:'relative',overflow:'hidden',cursor:tool==='select'?'crosshair':'grab'}}>
+      <div ref={containerRef} style={{flex:1,position:'relative',overflow:'hidden',cursor:(editMode||zoneEdit)?'move':tool==='select'?'crosshair':ctxMenu?'default':'grab'}}>
         <canvas ref={canvasRef} style={{display:'block',width:'100%',height:'100%'}}
           onMouseDown={onCanvasMouseDown}
           onMouseMove={onCanvasMouseMove}/>
@@ -935,6 +1327,31 @@ export default function App() {
         <div style={S.coordHud}>X: {cursor.x.toFixed(1)} &nbsp;|&nbsp; Z: {cursor.z.toFixed(1)}</div>
         <div style={S.zoomHud}>{zoomPct}%</div>
         <button onClick={centerMap} style={S.centerBtn} title="Zentrieren">⊡</button>
+
+        {/* Shift+LMB context menu */}
+        {ctxMenu&&(
+          <div style={{position:'absolute',top:ctxMenu.cy+8,left:ctxMenu.cx+8,background:'#0c1118',border:'1px solid #1a2030',borderRadius:5,overflow:'hidden',zIndex:50,minWidth:180,boxShadow:'0 4px 20px rgba(0,0,0,0.7)'}}>
+            <div style={{padding:'5px 10px',fontSize:9,color:'#2a3040',borderBottom:'1px solid #0d1521',letterSpacing:1}}>
+              X:{ctxMenu.wx.toFixed(1)} Z:{ctxMenu.wz.toFixed(1)}
+            </div>
+            <div style={{padding:'4px 0'}}>
+              <div onClick={()=>addRadiationZone(ctxMenu.wx,ctxMenu.wz)}
+                style={{padding:'7px 12px',fontSize:11,color:'#22c55e',cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontFamily:'monospace'}}
+                onMouseEnter={e=>e.currentTarget.style.background='#111c14'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <span>☢</span><span>Strahlungszone hinzufügen</span>
+              </div>
+            </div>
+            <div style={{padding:'4px 10px 6px',borderTop:'1px solid #0d1521'}}>
+              <button onClick={()=>setCtxMenu(null)}
+                style={{width:'100%',padding:'3px',background:'none',border:'none',color:'#2a3040',fontSize:9,cursor:'pointer',fontFamily:'monospace'}}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Click away to close context menu */}
+        {ctxMenu&&<div style={{position:'absolute',inset:0,zIndex:49}} onClick={()=>setCtxMenu(null)}/>}
 
         {!mapImg&&(
           <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center',pointerEvents:'none'}}>
