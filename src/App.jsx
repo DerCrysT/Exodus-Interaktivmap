@@ -805,8 +805,8 @@ export default function App() {
         const cx=e.clientX-r.left,cy=e.clientY-r.top
         const ip=cpToImg(cx,cy)
         const now=Date.now()
-        const isCtrl=e.ctrlKey
         if(now-ds.lastClick<350){
+          // Double-click → open editor for anomalies
           clearTimeout(ds.clickTimer)
           const hit=findAny(ip.x,ip.y)
           if(hit && (hit.type==='statAnom'||hit.type==='dynAnom'||hit.type==='teleport')){
@@ -815,14 +815,11 @@ export default function App() {
             setInspected(hit); setSections(s=>({...s,info:true}))
           }
         } else {
+          // Single-click → info panel for everything
           ds.clickTimer=setTimeout(()=>{
             const hit=findAny(ip.x,ip.y)
-            if(hit && (hit.type==='statAnom'||hit.type==='dynAnom'||hit.type==='teleport')){
-              setAnomEditor({ anomaly: {...hit.data, _original: hit.data}, type: hit.type })
-            } else {
-              setInspected(hit??null)
-              if(hit) setSections(s=>({...s,info:true}))
-            }
+            setInspected(hit??null)
+            if(hit) setSections(s=>({...s,info:true}))
           },350)
         }
         ds.lastClick=now
@@ -859,6 +856,11 @@ export default function App() {
         if(idx !== -1){
           next.dynamicAnomaly = [...prev.dynamicAnomaly]
           next.dynamicAnomaly[idx] = {...next.dynamicAnomaly[idx], ...payload}
+          RS.current.anomalies = next; mark(); return next
+        }
+        // New zone not found by reference or position — append it
+        if(orig.zonePosition && !prev.dynamicAnomaly.some(a => a.zonePosition && a.zonePosition[0]===orig.zonePosition[0] && a.zonePosition[2]===orig.zonePosition[2])){
+          next.dynamicAnomaly = [...prev.dynamicAnomaly, {...payload}]
           RS.current.anomalies = next; mark(); return next
         }
       }
