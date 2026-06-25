@@ -1029,6 +1029,35 @@ export default function App() {
     showToast(`${auto} hinzugefügt`)
   },[radiation, showToast])
 
+  const addDynAnomalyZone = useCallback((wx,wz) => {
+    if(!anomalies) return
+    const newZone = {
+      zoneType: 'Box',
+      zonePosition: [+wx.toFixed(6), 0, +wz.toFixed(6)],
+      zoneRadius: 150,
+      distanceBTWAnomaly: 30,
+      checkGeometry: 0,
+      anomalyData: [
+        'Jarka','Par','Electra','Kisel','Tramplin','Voronka','Teleport',
+        'XCP_Electro','XCP_Electro2','XCP_Fire','XCP_Chemical','XCP_Chemical_Red',
+        'XCP_Chemical_Blue','XCP_Chemical_Yellow','XCP_Steam','XCP_Frost','XCP_Funnel',
+        'XCP_Teleport','XCP_Springboard','XCP_Gravi','XCP_Chopper','XCP_Grabber',
+      ].map(name => ({
+        anomalyName: name,
+        anomalyCount: 1,
+        ArtefactsWithoutDetector: { SpawnChancePercent: 0, ArtefactsData: [] },
+        ArtefactsWithDetector:    { SpawnChancePercent: 0, ArtefactsData: [] },
+      }))
+    }
+    setAnomalies(prev => {
+      const next = {...prev, dynamicAnomaly: [...(prev.dynamicAnomaly||[]), newZone]}
+      RS.current.anomalies = next; mark(); return next
+    })
+    setAnomEditor({ anomaly: {...newZone, _original: newZone}, type: 'dynAnom' })
+    setCtxMenu(null)
+    showToast('Dynamische Zone hinzugefügt')
+  },[anomalies, showToast])
+
   const toggleLayer = k => setLayers(l=>({...l,[k]:!l[k]}))
   const toggleSec   = k => setSections(s=>({...s,[k]:!s[k]}))
   const toggleRadFilter = tier => setRadFilter(prev=>{ const n=new Set(prev); n.has(tier)?n.delete(tier):n.add(tier); return n })
@@ -1455,6 +1484,14 @@ export default function App() {
                 onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                 <span>☢</span><span>Strahlungszone hinzufügen</span>
               </div>
+              {anomalies&&(
+                <div onClick={()=>addDynAnomalyZone(ctxMenu.wx,ctxMenu.wz)}
+                  style={{padding:'7px 12px',fontSize:11,color:'#f59e0b',cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontFamily:'monospace'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='#161008'}
+                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <span>⚡</span><span>Dyn. Anomalie hinzufügen</span>
+                </div>
+              )}
             </div>
             <div style={{padding:'4px 10px 6px',borderTop:'1px solid #0d1521'}}>
               <button onClick={()=>setCtxMenu(null)}
