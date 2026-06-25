@@ -174,6 +174,8 @@ export default function App() {
   const [ctxMenu,     setCtxMenu]     = useState(null)
   // anomalyEditor: null | { anomaly, type, listKey, entryIdx }
   const [anomEditor,  setAnomEditor]  = useState(null)
+  // imgOffset: pixel offset applied to map image only (px in image space)
+  const [imgOffset,   setImgOffset]   = useState({x:0, z:0})
 
   // ── Refs ────────────────────────────────────────────────────────────
   const tfm        = useRef({ x:0, y:0, scale:0.07 })
@@ -184,9 +186,9 @@ export default function App() {
 
   // keep render state current
   useEffect(() => {
-    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit }
+    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset }
     mark()
-  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit])
+  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset])
 
   // ── Derived ─────────────────────────────────────────────────────────
   const tierList = useMemo(() =>
@@ -252,7 +254,7 @@ export default function App() {
     const rs = RS.current
     const {mapImg:img, zones:zns=[], radiation:rads=[], anomalies:anom,
            layers:L={}, tierFilter:TF, selectedIds:SI, inspected:IZ,
-           radFilter:RF, selRect:SR} = rs
+           radFilter:RF, selRect:SR, imgOffset:IO={x:0,z:0}} = rs
     const ppu = W.imgW / (W.xMax - W.xMin)
 
     // Background
@@ -261,7 +263,7 @@ export default function App() {
 
     // ── Map
     if (img) {
-      ctx.drawImage(img, 0, 0, W.imgW, W.imgH)
+      ctx.drawImage(img, IO.x, IO.z, W.imgW, W.imgH)
     } else {
       ctx.fillStyle='#0b1018'; ctx.fillRect(0,0,W.imgW,W.imgH)
       ctx.fillStyle='#1a2030'; ctx.font=`${140}px monospace`
@@ -1394,6 +1396,33 @@ export default function App() {
           {/* Stashes */}
           <Coll title="📦  Stashes" open={sections.stashes} onToggle={()=>toggleSec('stashes')}>
             <div style={{...S.stat,fontStyle:'italic'}}>In Vorbereitung (.dze)</div>
+          </Coll>
+
+          {/* Karten-Offset */}
+          <Coll title="🗺️  Karten-Offset" open={sections.mapOffset||false} onToggle={()=>setSections(s=>({...s,mapOffset:!s.mapOffset}))}>
+            <div style={{fontSize:9,color:'#3d4a5e',marginBottom:10,lineHeight:1.5}}>
+              PNG-Position anpassen ohne Koordinaten oder Zonen zu verändern.
+            </div>
+            {[['X  (Ost / West)', 'x'], ['Z  (Nord / Süd)', 'z']].map(([label, axis]) => (
+              <div key={axis} style={{marginBottom:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                  <span style={{fontSize:9,color:'#3d4a5e',letterSpacing:1}}>{label}</span>
+                  <span style={{fontSize:10,color:'#f97316',fontFamily:'monospace'}}>{imgOffset[axis] > 0 ? '+' : ''}{imgOffset[axis]} px</span>
+                </div>
+                <input type="range" min="-2000" max="2000" step="1" value={imgOffset[axis]}
+                  onChange={e => setImgOffset(prev => ({...prev, [axis]: +e.target.value}))}
+                  style={{width:'100%', accentColor:'#f97316', cursor:'pointer'}}/>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:8,color:'#1e2538',marginTop:2}}>
+                  <span>-2000</span><span>0</span><span>+2000</span>
+                </div>
+              </div>
+            ))}
+            <div style={{display:'flex',gap:6,marginTop:4}}>
+              <button onClick={() => setImgOffset({x:0, z:0})}
+                style={{flex:1,padding:'5px',background:'none',border:'1px solid #1a2030',borderRadius:3,color:'#3d4a5e',fontSize:9,cursor:'pointer',fontFamily:'monospace'}}>
+                ↺ Zurücksetzen
+              </button>
+            </div>
           </Coll>
         </div>
 
