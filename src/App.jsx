@@ -1616,6 +1616,13 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
   const updateDynArt  = (ei, ai, f, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData: e.ArtefactsWithDetector.ArtefactsData.map((a,j) => j!==ai ? a : {...a,[f]:v})}}))
   const addDynArt     = ei  => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:[...e.ArtefactsWithDetector.ArtefactsData,{ArtefactClassName:ARTEFACT_CLASSES[0],ArtefactSpawnChancePercent:100}]}}))
   const removeDynArt  = (ei, ai) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:e.ArtefactsWithDetector.ArtefactsData.filter((_,j)=>j!==ai)}}))
+  const addDynEntry   = () => setDynEntries(p => [...p, {
+    anomalyName: ANOMALY_NAMES[0],
+    anomalyCount: 1,
+    ArtefactsWithDetector: { SpawnChancePercent: 0, ArtefactsData: [] },
+    ArtefactsWithoutDetector: { SpawnChancePercent: 0, ArtefactsData: [] },
+  }])
+  const removeDynEntry = ei => setDynEntries(p => p.filter((_,i) => i!==ei))
 
   // ── Static/teleport helpers
   const updateArt = (idx, f, v) => setWithDetector(p => ({...p, ArtefactsData: p.ArtefactsData.map((a,i) => i!==idx ? a : {...a,[f]:v})}))
@@ -1624,29 +1631,17 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
 
   const handleSave = () => {
     if(isDyn){
-      // Build updated anomalyData from dynEntries
-      const updated = (anomaly.anomalyData||[]).map((orig,i) => {
-        const e = dynEntries[i]; if(!e) return orig
-        return {...orig,
-          anomalyName: e.anomalyName,
-          anomalyCount: Number(e.anomalyCount)||0,
-          ArtefactsWithDetector:{
-            SpawnChancePercent: Number(e.ArtefactsWithDetector.SpawnChancePercent)||0,
-            ArtefactsData: e.ArtefactsWithDetector.ArtefactsData.map(a=>({...a, ArtefactSpawnChancePercent:Number(a.ArtefactSpawnChancePercent)||0}))
-          }
+      // Use dynEntries directly (not anomaly.anomalyData) so new entries are included
+      const newAnomalyData = dynEntries.map(e => ({
+        anomalyName: e.anomalyName,
+        anomalyCount: Number(e.anomalyCount)||1,
+        ArtefactsWithoutDetector: e.ArtefactsWithoutDetector || { SpawnChancePercent: 0, ArtefactsData: [] },
+        ArtefactsWithDetector: {
+          SpawnChancePercent: Number(e.ArtefactsWithDetector.SpawnChancePercent)||0,
+          ArtefactsData: e.ArtefactsWithDetector.ArtefactsData.map(a=>({...a, ArtefactSpawnChancePercent:Number(a.ArtefactSpawnChancePercent)||0}))
         }
-      })
-      // Merge duplicate anomalyNames: sum counts, keep first entry's artefacts
-      const merged = []
-      updated.forEach(entry => {
-        const existing = merged.find(m => m.anomalyName === entry.anomalyName)
-        if(existing){
-          existing.anomalyCount += entry.anomalyCount
-        } else {
-          merged.push({...entry})
-        }
-      })
-      onSave({...anomaly, zoneRadius: Number(zoneRadius)||150, distanceBTWAnomaly: Number(distanceBTW)||0, anomalyData: merged})
+      }))
+      onSave({...anomaly, zoneRadius: Number(zoneRadius)||150, distanceBTWAnomaly: Number(distanceBTW)||0, anomalyData: newAnomalyData})
     } else {
       onSave({...anomaly, ArtefactsWithDetector:{
         SpawnChancePercent: Number(withDetector.SpawnChancePercent)||0,
@@ -1744,6 +1739,8 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
                       style={inp({width:44})}
                       max={Infinity}
                     />
+                    <button onClick={() => removeDynEntry(i)}
+                      style={{background:'none',border:'1px solid #ef4444',borderRadius:3,color:'#ef4444',fontSize:11,cursor:'pointer',padding:'2px 6px',marginLeft:4,lineHeight:1}}>✕</button>
                   </div>
                   <ArtList
                     arts={entry.ArtefactsWithDetector.ArtefactsData}
@@ -1755,6 +1752,10 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
                   />
                 </div>
               ))}
+              <button onClick={addDynEntry}
+                style={{width:'100%',padding:'7px',background:'none',border:'1px dashed #f59e0b',borderRadius:3,color:'#f59e0b',fontSize:10,cursor:'pointer',fontFamily:'monospace',letterSpacing:1,marginTop:4}}>
+                + Anomalie hinzufügen
+              </button>
             </>
           ) : (
             <ArtList
