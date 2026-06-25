@@ -688,7 +688,7 @@ export default function App() {
     }
 
     // ── Dyn anomaly drag ─────────────────────────────────────────────────
-    if(RS.current.anomalies?.dynamicAnomaly && !e.shiftKey) {
+    if(RS.current.anomalies?.dynamicAnomaly && !e.shiftKey && !e.ctrlKey) {
       const ip = cpToImg(cp.x,cp.y)
       const ppu2 = W.imgW/(W.xMax-W.xMin)
       const dynArr = RS.current.anomalies.dynamicAnomaly
