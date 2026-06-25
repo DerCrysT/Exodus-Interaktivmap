@@ -170,6 +170,8 @@ export default function App() {
   const [editMode,    setEditMode]    = useState(null)
   // zoneEditMode: null | { idx, draft:{name,pos,triggerRadius,despawnDistance} }
   const [zoneEdit,    setZoneEdit]    = useState(null)
+  // dynDrag: null | { idx, zonePosition (live) }
+  const [dynDrag,     setDynDrag]     = useState(null)
   // contextMenu: null | { cx,cy,wx,wz }  (canvas px position + world coords)
   const [ctxMenu,     setCtxMenu]     = useState(null)
   // anomalyEditor: null | { anomaly, type, listKey, entryIdx }
@@ -186,9 +188,9 @@ export default function App() {
 
   // keep render state current
   useEffect(() => {
-    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset }
+    RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset, dynDrag }
     mark()
-  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset])
+  }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset, dynDrag])
 
   // ── Derived ─────────────────────────────────────────────────────────
   const tierList = useMemo(() =>
@@ -429,16 +431,29 @@ export default function App() {
 
     // ── Dynamic anomalies
     if (L.dynAnom && anom?.dynamicAnomaly) {
-      anom.dynamicAnomaly.forEach(f=>{
-        const posArr=f.zonePosition; if(!posArr) return
+      const DD = rs.dynDrag
+      anom.dynamicAnomaly.forEach((f,fi)=>{
+        // Use live position if this zone is being dragged
+        const posArr = (DD && DD.idx===fi) ? DD.zonePosition : f.zonePosition
+        if(!posArr) return
         const pos={x:posArr[0],z:posArr[2]}
         const p=wToP(pos.x,pos.z),r=(f.zoneRadius||150)*ppu
+        const isDragging = DD && DD.idx===fi
         ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2)
-        ctx.fillStyle='rgba(245,158,11,0.1)'; ctx.strokeStyle='rgba(245,158,11,0.6)'
-        ctx.lineWidth=2/sc; ctx.setLineDash([10/sc,5/sc])
+        ctx.fillStyle=isDragging?'rgba(245,158,11,0.22)':'rgba(245,158,11,0.1)'
+        ctx.strokeStyle=isDragging?'rgba(245,158,11,1)':'rgba(245,158,11,0.6)'
+        ctx.lineWidth=(isDragging?3:2)/sc; ctx.setLineDash([10/sc,5/sc])
         ctx.fill(); ctx.stroke(); ctx.setLineDash([])
-        ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(5/sc,2),0,Math.PI*2)
+        ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(isDragging?8:5/sc,2),0,Math.PI*2)
         ctx.fillStyle='#f59e0b'; ctx.fill()
+        if(isDragging && sc>0.05){
+          const fs=Math.max(11/sc,7)
+          ctx.font=`${fs}px monospace`; ctx.textAlign='center'; ctx.textBaseline='bottom'
+          ctx.strokeStyle='rgba(0,0,0,0.8)'; ctx.lineWidth=3/sc
+          const label=`${pos.x.toFixed(0)} / ${pos.z.toFixed(0)}`
+          ctx.strokeText(label,p.x,p.y-r-6/sc)
+          ctx.fillStyle='#f59e0b'; ctx.fillText(label,p.x,p.y-r-6/sc)
+        }
       })
     }
 
@@ -669,6 +684,49 @@ export default function App() {
         const onUpZ=()=>{window.removeEventListener('mousemove',onMoveZ);window.removeEventListener('mouseup',onUpZ);ds.active=false}
         window.addEventListener('mousemove',onMoveZ); window.addEventListener('mouseup',onUpZ)
         return
+      }
+    }
+
+    // ── Dyn anomaly drag ─────────────────────────────────────────────────
+    if(RS.current.anomalies?.dynamicAnomaly && !e.shiftKey) {
+      const ip = cpToImg(cp.x,cp.y)
+      const ppu2 = W.imgW/(W.xMax-W.xMin)
+      const dynArr = RS.current.anomalies.dynamicAnomaly
+      for(let di=0; di<dynArr.length; di++){
+        const dz = dynArr[di]
+        if(!dz.zonePosition) continue
+        const p = wToP(dz.zonePosition[0], dz.zonePosition[2])
+        const handleR2 = Math.max(14/tfm.current.scale, (dz.zoneRadius||150)*ppu2*0.4)
+        if(Math.hypot(ip.x-p.x, ip.y-p.y) < handleR2){
+          ds.active=true; ds.type='dynDrag'
+          ds.editOffset={ dx: ip.x-p.x, dy: ip.y-p.y }
+          setDynDrag({ idx: di, zonePosition: [...dz.zonePosition] })
+          const onMoveDyn = e2 => {
+            const r2=canvasRef.current?.getBoundingClientRect(); if(!r2) return
+            const ip2=cpToImg(e2.clientX-r2.left, e2.clientY-r2.top)
+            const wc=pToW(ip2.x-ds.editOffset.dx, ip2.y-ds.editOffset.dy)
+            setDynDrag(prev => prev ? ({...prev, zonePosition:[+wc.x.toFixed(3), prev.zonePosition[1]||0, +wc.z.toFixed(3)]}) : null)
+            setCursor({x:+wc.x.toFixed(1),z:+wc.z.toFixed(1)})
+          }
+          const onUpDyn = () => {
+            window.removeEventListener('mousemove',onMoveDyn)
+            window.removeEventListener('mouseup',onUpDyn)
+            ds.active=false
+            setDynDrag(prev => {
+              if(!prev) return null
+              setAnomalies(a => {
+                if(!a?.dynamicAnomaly) return a
+                const next = {...a, dynamicAnomaly: [...a.dynamicAnomaly]}
+                next.dynamicAnomaly[prev.idx] = {...next.dynamicAnomaly[prev.idx], zonePosition:[...prev.zonePosition]}
+                RS.current.anomalies=next; mark(); return next
+              })
+              return null
+            })
+          }
+          window.addEventListener('mousemove',onMoveDyn)
+          window.addEventListener('mouseup',onUpDyn)
+          return
+        }
       }
     }
 
