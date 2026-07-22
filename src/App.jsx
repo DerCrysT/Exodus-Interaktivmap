@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const W = {
   xMin: 971.913025, xMax: 8036.71,
   zMin: 184.007996, zMax: 9267.070313,
-  imgW: 6830,       imgH: 8745,
+  imgW: 6830,        imgH: 8745,
 }
 const wToP = (wx, wz) => ({
   x: (wx - W.xMin) / (W.xMax - W.xMin) * W.imgW,
@@ -36,7 +36,6 @@ const tcol = id => {
 }
 const hexA = (hex, a) => {
   if (hex.startsWith('hsl')) {
-    // convert hsl string to rgba approximately via a canvas trick isn't available; use opacity wrapper
     return hex.replace('hsl(', 'hsla(').replace(')', `,${a})`)
   }
   const r = parseInt(hex.slice(1,3),16)
@@ -49,15 +48,13 @@ const hexA = (hex, a) => {
 const radTier = maxMsv => {
   if (maxMsv <= 150) return { tier:1, color:'#22c55e',  label:'Tier 1 (≤150 mSv)' }
   if (maxMsv <= 350) return { tier:2, color:'#f59e0b',  label:'Tier 2 (≤350 mSv)' }
-  return                    { tier:3, color:'#ef4444',  label:'Tier 3 (>350 mSv)' }
+  return                   { tier:3, color:'#ef4444',  label:'Tier 3 (>350 mSv)' }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // DATA PARSERS
 // ═══════════════════════════════════════════════════════════════════════
 
-// Zones.json: each zone has a position (center) and spawnPoints[]
-// spawnPoints have {position, radius, tierIds[], entities}
 function parseZones(rawArr) {
   return rawArr.map(z => {
     const pos = parsePos(z.position || z.Position)
@@ -66,8 +63,8 @@ function parseZones(rawArr) {
       const spos = parsePos(sp.position || sp.Position)
       if (!spos) return null
       return {
-        pos:     spos,
-        radius:  +(sp.radius || sp.Radius || 5),
+        pos:      spos,
+        radius:   +(sp.radius || sp.Radius || 5),
         tierIds: (sp.tierIds || sp.TierIds || sp.tiers || []).map(String),
         entities: +(sp.entities || 1),
       }
@@ -84,7 +81,6 @@ function parseZones(rawArr) {
   }).filter(Boolean)
 }
 
-// Tiers.json: { "tiers": { "1": { name, classnames[] } } }  OR  { "1": {...} }
 function parseTiersJson(json) {
   const root = json.tiers || json.Tiers || json
   if (typeof root !== 'object' || Array.isArray(root)) return {}
@@ -98,7 +94,6 @@ function parseTiersJson(json) {
   return out
 }
 
-// RadiationZones.json: many possible structures
 function parseRadiation(json) {
   let arr
   if      (Array.isArray(json))                arr = json
@@ -116,7 +111,6 @@ function parseRadiation(json) {
     if (!pos) return null
     const iMax = +(r.intensityMax||r.IntensityMax||r.maxIntensity||50)
     const iMin = +(r.intensityMin||r.IntensityMin||r.minIntensity||5)
-    // triggerRadius is the correct field per user data; fallback chain for other formats
     const radius = +(
       r.triggerRadius ?? r.TriggerRadius ??
       r.radius ?? r.Radius ??
@@ -125,7 +119,7 @@ function parseRadiation(json) {
     return {
       name:         r.name || r.Name || 'Rad Zone',
       pos,
-      radius,           // used for rendering circle size
+      radius,
       intensityMin: iMin,
       intensityMax: iMax,
       rt:           radTier(iMax),
@@ -144,11 +138,10 @@ export default function App() {
   // ── State ───────────────────────────────────────────────────────────
   const [mapImg,     setMapImg]     = useState(null)
   const [zones,      setZones]      = useState([])
-  const [tiers,      setTiers]      = useState({})      // { id → {name, classnames} }
+  const [tiers,      setTiers]      = useState({})
   const [radiation,  setRadiation]  = useState([])
   const [anomalies,  setAnomalies]  = useState(null)
 
-  // tierFilter: null = all visible; Set<string> = only those tier IDs shown
   const [tierFilter, setTierFilter] = useState(null)
 
   const [layers, setLayers] = useState({
@@ -159,47 +152,38 @@ export default function App() {
     teleports:true, dynAnom:true, statAnom:true,
   })
   const [tool,        setTool]        = useState('pan')
-  const [selectedIds, setSelectedIds] = useState(null)  // drag-select zone name filter
-  const [inspected,   setInspected]   = useState(null)  // zone clicked
+  const [selectedIds, setSelectedIds] = useState(null)
+  const [inspected,   setInspected]   = useState(null)
   const [cursor,      setCursor]      = useState({x:0,z:0})
   const [zoomPct,     setZoomPct]     = useState(7)
   const [sections,    setSections]    = useState({info:true,mutants:true,rad:true,anom:true,stashes:false})
   const [toast,       setToast]       = useState(null)
-  const [radFilter,   setRadFilter]   = useState(new Set([1,2,3]))  // radiation tier filter
-  // editMode (radiation): null | { idx, draft }
+  const [radFilter,   setRadFilter]   = useState(new Set([1,2,3]))
   const [editMode,    setEditMode]    = useState(null)
-  // zoneEditMode: null | { idx, draft:{name,pos,triggerRadius,despawnDistance} }
   const [zoneEdit,    setZoneEdit]    = useState(null)
-  // dynDrag: null | { idx, zonePosition (live) }
   const [dynDrag,     setDynDrag]     = useState(null)
-  // contextMenu: null | { cx,cy,wx,wz }  (canvas px position + world coords)
   const [ctxMenu,     setCtxMenu]     = useState(null)
-  // anomalyEditor: null | { anomaly, type, listKey, entryIdx }
   const [anomEditor,  setAnomEditor]  = useState(null)
-  // imgOffset: pixel offset applied to map image only (px in image space)
   const [imgOffset,   setImgOffset]   = useState({x:0, z:0})
 
   // ── Refs ────────────────────────────────────────────────────────────
   const tfm        = useRef({ x:0, y:0, scale:0.07 })
-  const RS         = useRef({})          // render state mirror
+  const RS         = useRef({})
   const needRender = useRef(true)
   const rafId      = useRef(null)
   const mark       = () => { needRender.current = true }
 
-  // keep render state current
   useEffect(() => {
     RS.current = { mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset, dynDrag }
     mark()
   }, [mapImg, zones, tiers, radiation, anomalies, layers, tierFilter, selectedIds, inspected, radFilter, editMode, zoneEdit, imgOffset, dynDrag])
 
-  // ── Derived ─────────────────────────────────────────────────────────
   const tierList = useMemo(() =>
     Object.entries(tiers)
       .sort((a,b) => +a[0] - +b[0])
       .map(([id,t]) => ({ id, name: t.name, color: tcol(id) }))
   , [tiers])
 
-  // collect all tier IDs actually used in zones
   const usedTierIds = useMemo(() => {
     const s = new Set()
     zones.forEach(z => z.spawnPoints.forEach(sp => sp.tierIds.forEach(id => s.add(id))))
@@ -218,7 +202,6 @@ export default function App() {
     return m
   }, [zones])
 
-  // ── Clear inspected when its layer turns off ──────────────────────────
   useEffect(() => {
     if (!inspected) return
     const t = inspected.type
@@ -231,7 +214,6 @@ export default function App() {
     if (t === 'teleport'  && !L.teleports)    setInspected(null)
   }, [layers, inspected])
 
-  // Clear inspected zone when its tier is filtered out
   useEffect(() => {
     if (!inspected || inspected.type !== 'zone') return
     if (!tierFilter) return
@@ -259,11 +241,9 @@ export default function App() {
            radFilter:RF, selRect:SR, imgOffset:IO={x:0,z:0}} = rs
     const ppu = W.imgW / (W.xMax - W.xMin)
 
-    // Background
     ctx.fillStyle='#07090d'; ctx.fillRect(0,0,CW,CH)
     ctx.save(); ctx.translate(tx,ty); ctx.scale(sc,sc)
 
-    // ── Map
     if (img) {
       ctx.drawImage(img, IO.x, IO.z, W.imgW, W.imgH)
     } else {
@@ -273,10 +253,8 @@ export default function App() {
       ctx.fillText('← Karte importieren', W.imgW/2, W.imgH/2)
     }
 
-    // ── Filter zones by drag-select
     let visZones = SI ? zns.filter(z=>SI.has(z.name)) : zns
 
-    // ── For a zone to be drawn, it needs at least one visible spawnPoint (or no spawnPoints at all)
     const zoneHasVisibleSP = z => {
       if (!z.spawnPoints.length) return true
       if (!TF) return true
@@ -284,7 +262,6 @@ export default function App() {
     }
     visZones = visZones.filter(zoneHasVisibleSP)
 
-    // ── Despawn radius
     if (L.despawnRadius) {
       visZones.forEach(z => {
         const p=wToP(z.pos.x,z.pos.z), r=z.despawnDistance*ppu
@@ -294,14 +271,12 @@ export default function App() {
       })
     }
 
-    // ── Trigger radius (zone outer ring)
     if (L.triggerRadius) {
       visZones.forEach(z => {
         const p=wToP(z.pos.x,z.pos.z), r=Math.max(z.triggerRadius*ppu,3/sc)
         ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2)
         ctx.fillStyle='rgba(148,163,184,0.05)'; ctx.strokeStyle='rgba(148,163,184,0.35)'
         ctx.lineWidth=1.5/sc; ctx.fill(); ctx.stroke()
-        // center cross
         const cs=Math.max(6/sc,2)
         ctx.beginPath(); ctx.moveTo(p.x-cs,p.y); ctx.lineTo(p.x+cs,p.y)
         ctx.moveTo(p.x,p.y-cs); ctx.lineTo(p.x,p.y+cs)
@@ -309,7 +284,6 @@ export default function App() {
       })
     }
 
-    // ── Individual SpawnPoints
     if (L.spawnPoints) {
       visZones.forEach(z => {
         z.spawnPoints.forEach(sp => {
@@ -318,7 +292,6 @@ export default function App() {
           const mainId = sp.tierIds[0]
           const c = tcol(mainId)
 
-          // Spawn radius circle
           if (L.spawnRadius) {
             const r = Math.max(sp.radius*ppu, 2/sc)
             ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2)
@@ -326,13 +299,11 @@ export default function App() {
             ctx.lineWidth=1/sc; ctx.fill(); ctx.stroke()
           }
 
-          // Center dot
           const dr=Math.max(4/sc,1.8)
           ctx.beginPath(); ctx.arc(p.x,p.y,dr,0,Math.PI*2)
           ctx.fillStyle=c; ctx.strokeStyle='rgba(0,0,0,0.65)'; ctx.lineWidth=0.8/sc
           ctx.fill(); ctx.stroke()
 
-          // Multiple tier IDs → small extra dots
           if (sp.tierIds.length>1) {
             sp.tierIds.slice(1).forEach((id,i)=>{
               const off=(i+1)*(dr*2.4)
@@ -344,7 +315,6 @@ export default function App() {
       })
     }
 
-    // ── Zone names
     if (L.zoneNames && sc>0.07) {
       const fs=Math.max(11/sc,7)
       ctx.font=`${fs}px "Courier New",monospace`
@@ -357,7 +327,6 @@ export default function App() {
       })
     }
 
-    // ── Inspected highlight (works for any {type,data} object)
     if (IZ) {
       const d=IZ.data, pos=d.pos
       if(pos) {
@@ -375,7 +344,6 @@ export default function App() {
       }
     }
 
-    // ── Radiation zones (solid flat color by intensity tier)
     if (L.radiation) {
       rads.forEach(rad=>{
         if (!RF || !RF.has(rad.rt.tier)) return
@@ -384,7 +352,6 @@ export default function App() {
         ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2)
         ctx.fillStyle=hexA(c,0.2); ctx.strokeStyle=hexA(c,0.75)
         ctx.lineWidth=2.5/sc; ctx.fill(); ctx.stroke()
-        // Inner pulse ring
         ctx.beginPath(); ctx.arc(p.x,p.y,r*0.3,0,Math.PI*2)
         ctx.fillStyle=hexA(c,0.35); ctx.fill()
         if (sc>0.1) {
@@ -404,7 +371,6 @@ export default function App() {
       })
     }
 
-    // ── Teleports
     if (L.teleports && anom?.teleportAnomaly) {
       anom.teleportAnomaly.forEach(tp=>{
         const fpArr=tp.anomalyPosition
@@ -429,11 +395,9 @@ export default function App() {
       })
     }
 
-    // ── Dynamic anomalies
     if (L.dynAnom && anom?.dynamicAnomaly) {
       const DD = rs.dynDrag
       anom.dynamicAnomaly.forEach((f,fi)=>{
-        // Use live position if this zone is being dragged
         const posArr = (DD && DD.idx===fi) ? DD.zonePosition : f.zonePosition
         if(!posArr) return
         const pos={x:posArr[0],z:posArr[2]}
@@ -457,7 +421,6 @@ export default function App() {
       })
     }
 
-    // ── Static anomalies
     if (L.statAnom && anom?.staticAnomaly) {
       anom.staticAnomaly.forEach(sa=>{
         const positions=sa.anomalyPosition; if(!positions||!positions.length) return
@@ -472,8 +435,6 @@ export default function App() {
       })
     }
 
-
-    // ── Edit mode: draw draft radiation zone on top
     const EM = rs.editMode
     if (EM) {
       const d = EM.draft
@@ -506,29 +467,24 @@ export default function App() {
       }
     }
 
-    // ── Zone edit preview: trigger + despawn rings with drag handle
     const ZE = rs.zoneEdit
     if (ZE) {
       const d = ZE.draft
       const ep = wToP(d.pos.x, d.pos.z)
-      // Despawn ring
       const rd = Math.max(d.despawnDistance * ppu, 3/sc)
       ctx.beginPath(); ctx.arc(ep.x, ep.y, rd, 0, Math.PI*2)
       ctx.fillStyle='rgba(250,204,21,0.06)'; ctx.strokeStyle='rgba(250,204,21,0.6)'
       ctx.lineWidth=2/sc; ctx.setLineDash([12/sc,6/sc]); ctx.fill(); ctx.stroke(); ctx.setLineDash([])
-      // Trigger ring
       const rt2 = Math.max(d.triggerRadius * ppu, 3/sc)
       ctx.beginPath(); ctx.arc(ep.x, ep.y, rt2, 0, Math.PI*2)
       ctx.fillStyle='rgba(148,163,184,0.1)'; ctx.strokeStyle='#94a3b8'
       ctx.lineWidth=2/sc; ctx.setLineDash([10/sc,5/sc]); ctx.fill(); ctx.stroke(); ctx.setLineDash([])
-      // Center crosshair + handle
       const cs2 = Math.max(14/sc, 5)
       ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1.5/sc
       ctx.beginPath(); ctx.moveTo(ep.x-cs2,ep.y); ctx.lineTo(ep.x+cs2,ep.y)
       ctx.moveTo(ep.x,ep.y-cs2); ctx.lineTo(ep.x,ep.y+cs2); ctx.stroke()
       ctx.beginPath(); ctx.arc(ep.x, ep.y, Math.max(8/sc,3), 0, Math.PI*2)
       ctx.fillStyle='#94a3b8'; ctx.strokeStyle='rgba(0,0,0,0.6)'; ctx.lineWidth=1/sc; ctx.fill(); ctx.stroke()
-      // Label
       if (sc > 0.07) {
         const fs = Math.max(12/sc, 8)
         ctx.font=`bold ${fs}px monospace`; ctx.textAlign='center'; ctx.textBaseline='bottom'
@@ -541,7 +497,6 @@ export default function App() {
       }
     }
 
-    // ── Drag-select rectangle
     if (SR) {
       const rx=Math.min(SR.x1,SR.x2),ry=Math.min(SR.y1,SR.y2)
       const rw=Math.abs(SR.x2-SR.x1),rh=Math.abs(SR.y2-SR.y1)
@@ -556,32 +511,26 @@ export default function App() {
 
   useEffect(()=>{ rafId.current=requestAnimationFrame(draw); return ()=>cancelAnimationFrame(rafId.current) },[draw])
 
-  // ── Canvas resize ───────────────────────────────────────────────────
   useEffect(()=>{
     const resize=()=>{ const c=canvasRef.current,ct=containerRef.current; if(!c||!ct) return; c.width=ct.clientWidth; c.height=ct.clientHeight; mark() }
     resize(); window.addEventListener('resize',resize); return ()=>window.removeEventListener('resize',resize)
   },[])
 
-  // ── Non-passive wheel ───────────────────────────────────────────────
   useEffect(()=>{
     const el=canvasRef.current; if(!el) return
     const h=e=>{ e.preventDefault(); const r=el.getBoundingClientRect(),cx=e.clientX-r.left,cy=e.clientY-r.top,t=tfm.current,d=e.deltaY>0?0.85:1.18,ns=Math.min(Math.max(t.scale*d,.015),14); t.x=cx-(cx-t.x)*(ns/t.scale); t.y=cy-(cy-t.y)*(ns/t.scale); t.scale=ns; setZoomPct(Math.round(ns*100)); mark() }
     el.addEventListener('wheel',h,{passive:false}); return ()=>el.removeEventListener('wheel',h)
   },[])
 
-  // ── Center map ──────────────────────────────────────────────────────
   const centerMap = useCallback(()=>{
     const ct=containerRef.current; if(!ct) return
     const cw=ct.clientWidth,ch=ct.clientHeight,sc=Math.min(cw/W.imgW,ch/W.imgH)*0.94
     tfm.current={x:(cw-W.imgW*sc)/2,y:(ch-W.imgH*sc)/2,scale:sc}; setZoomPct(Math.round(sc*100)); mark()
   },[])
 
-  // ── Coord helpers ───────────────────────────────────────────────────
   const getCP   = e=>{ const r=canvasRef.current.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top} }
   const cpToImg = (cx,cy)=>{ const {x:tx,y:ty,scale:sc}=tfm.current; return {x:(cx-tx)/sc,y:(cy-ty)/sc} }
 
-  // Returns {type:'zone'|'radiation'|'teleport'|'dynAnom'|'statAnom', data} or null
-  // Only searches layers that are currently visible
   const findAny = useCallback((imgX,imgY)=>{
     const {zones:zns=[], radiation:rads=[], anomalies:anom, layers:L={}, tierFilter:TF, radFilter:RF} = RS.current
     const ppu    = W.imgW/(W.xMax-W.xMin)
@@ -595,7 +544,6 @@ export default function App() {
       if(d<hit && d<bestD){ best=candidate; bestD=d }
     }
 
-    // Mutant zones — only if at least one mutant layer is on
     const mutantsActive = L.triggerRadius||L.despawnRadius||L.spawnPoints
     if(mutantsActive) {
       zns.forEach(z=>{
@@ -604,7 +552,6 @@ export default function App() {
       })
     }
 
-    // Radiation zones
     if(L.radiation) {
       rads.forEach(rad=>{
         if(RF && !RF.has(rad.rt.tier)) return
@@ -612,7 +559,6 @@ export default function App() {
       })
     }
 
-    // Static anomalies
     if(anom && L.statAnom && anom.staticAnomaly) {
       anom.staticAnomaly.forEach(sa=>{
         const positions=sa.anomalyPosition; if(!positions||!positions.length) return
@@ -622,7 +568,6 @@ export default function App() {
         })
       })
     }
-    // Dynamic anomaly fields
     if(anom && L.dynAnom && anom.dynamicAnomaly) {
       anom.dynamicAnomaly.forEach(f=>{
         const posArr=f.zonePosition; if(!posArr) return
@@ -630,7 +575,6 @@ export default function App() {
         check(pos, f.zoneRadius||150, {type:'dynAnom', data:{...f, pos}})
       })
     }
-    // Teleports (from-position)
     if(anom && L.teleports && anom.teleportAnomaly) {
       anom.teleportAnomaly.forEach(tp=>{
         const posArr=tp.anomalyPosition; if(!posArr) return
@@ -642,10 +586,6 @@ export default function App() {
     return best
   },[])
 
-  // ═══════════════════════════════════════════════════════════════════
-  // MOUSE INTERACTION
-  // Uses window-level listeners during drag so motion outside canvas works
-  // ═══════════════════════════════════════════════════════════════════
   const dragState = useRef({ active:false, type:null, panStart:{}, selStart:{}, hasMoved:false, lastClick:0, clickTimer:null })
 
   const onCanvasMouseDown = useCallback(e=>{
@@ -655,7 +595,6 @@ export default function App() {
     const ds=dragState.current
     ds.hasMoved=false
 
-    // ── Shift+LMB → open context menu at clicked world position
     if(e.shiftKey && toolRef.current==='pan') {
       e.preventDefault()
       const ip=cpToImg(cp.x,cp.y)
@@ -664,7 +603,6 @@ export default function App() {
       return
     }
 
-    // ── Zone-edit drag (move spawn zone center)
     if(RS.current.zoneEdit) {
       const ze=RS.current.zoneEdit
       const ip=cpToImg(cp.x,cp.y)
@@ -687,7 +625,6 @@ export default function App() {
       }
     }
 
-    // ── Dyn anomaly drag ─────────────────────────────────────────────────
     if(RS.current.anomalies?.dynamicAnomaly && !e.shiftKey && e.ctrlKey) {
       const ip = cpToImg(cp.x,cp.y)
       const ppu2 = W.imgW/(W.xMax-W.xMin)
@@ -730,14 +667,12 @@ export default function App() {
       }
     }
 
-    // ── Edit mode: drag zone center ──────────────────────────────────────
     if(RS.current.editMode) {
       const em = RS.current.editMode
       const ip = cpToImg(cp.x,cp.y)
       const p  = wToP(em.draft.pos.x, em.draft.pos.z)
       const ppu= W.imgW/(W.xMax-W.xMin)
       const handleR = Math.max(16/tfm.current.scale, em.draft.radius*ppu*0.5)
-      // If click is within handle radius → start drag
       if(Math.hypot(ip.x-p.x, ip.y-p.y) < handleR) {
         ds.active=true; ds.type='editDrag'
         ds.editOffset={ dx: ip.x-p.x, dy: ip.y-p.y }
@@ -746,7 +681,6 @@ export default function App() {
           const cx2=e2.clientX-r2.left, cy2=e2.clientY-r2.top
           const ip2=cpToImg(cx2,cy2)
           const wc=pToW(ip2.x-ds.editOffset.dx, ip2.y-ds.editOffset.dy)
-          // Update draft pos
           setEditMode(prev=>prev?({...prev,draft:{...prev.draft,pos:{x:+wc.x.toFixed(3),z:+wc.z.toFixed(3)}}}):null)
           setCursor({x:+wc.x.toFixed(1),z:+wc.z.toFixed(1)})
         }
@@ -806,7 +740,6 @@ export default function App() {
         const ip=cpToImg(cx,cy)
         const now=Date.now()
         if(now-ds.lastClick<350){
-          // Double-click → open editor for anomalies
           clearTimeout(ds.clickTimer)
           const hit=findAny(ip.x,ip.y)
           if(hit && (hit.type==='statAnom'||hit.type==='dynAnom'||hit.type==='teleport')){
@@ -815,7 +748,6 @@ export default function App() {
             setInspected(hit); setSections(s=>({...s,info:true}))
           }
         } else {
-          // Single-click → info panel for everything
           ds.clickTimer=setTimeout(()=>{
             const hit=findAny(ip.x,ip.y)
             setInspected(hit??null)
@@ -834,7 +766,6 @@ export default function App() {
   const toolRef = useRef('pan')
   useEffect(()=>{ toolRef.current=tool },[tool])
 
-  // ── Save anomaly editor changes back into anomalies state ────────────
   const saveAnomEditor = useCallback((edited) => {
     setAnomalies(prev => {
       if(!prev) return prev
@@ -858,7 +789,6 @@ export default function App() {
           next.dynamicAnomaly[idx] = {...next.dynamicAnomaly[idx], ...payload}
           RS.current.anomalies = next; mark(); return next
         }
-        // New zone not found by reference or position — append it
         if(orig.zonePosition && !prev.dynamicAnomaly.some(a => a.zonePosition && a.zonePosition[0]===orig.zonePosition[0] && a.zonePosition[2]===orig.zonePosition[2])){
           next.dynamicAnomaly = [...prev.dynamicAnomaly, {...payload}]
           RS.current.anomalies = next; mark(); return next
@@ -877,7 +807,6 @@ export default function App() {
     setAnomEditor(null)
   },[mark])
 
-  // ── Export anomalies JSON ────────────────────────────────────────────
   const exportAnomalies = useCallback(() => {
     if(!anomalies) return
     const blob = new Blob([JSON.stringify(anomalies, null, 2)], {type:'application/json'})
@@ -887,17 +816,12 @@ export default function App() {
     URL.revokeObjectURL(url)
   },[anomalies])
 
-  // ── Move-only handler for cursor coord display when not dragging
   const onCanvasMouseMove = useCallback(e=>{
-    if(dragState.current.active) return   // handled by window listener
+    if(dragState.current.active) return
     const cp=getCP(e),ip=cpToImg(cp.x,cp.y),wc=pToW(ip.x,ip.y)
     setCursor({x:+wc.x.toFixed(1),z:+wc.z.toFixed(1)})
   },[])
 
-  // ═══════════════════════════════════════════════════════════════════
-  // FILE IMPORT
-  // Uses FileReader.readAsDataURL for images (works in sandboxed iframes)
-  // ═══════════════════════════════════════════════════════════════════
   const showToast = useCallback((msg,type='ok')=>{
     setToast({msg,type}); setTimeout(()=>setToast(null),4000)
   },[])
@@ -905,13 +829,12 @@ export default function App() {
   const handleFile = useCallback(async(file,type)=>{
     try {
       if(type==='map'){
-        // Use FileReader (readAsDataURL) — works in sandboxed canvas contexts
         const reader = new FileReader()
         reader.onload = ev => {
           const img = new Image()
           img.onload  = () => { setMapImg(img); RS.current.mapImg=img; mark(); setTimeout(centerMap,60) }
           img.onerror = () => showToast('Bild konnte nicht geladen werden','error')
-          img.src = ev.target.result   // data:image/...;base64,...
+          img.src = ev.target.result
         }
         reader.onerror = () => showToast('Datei konnte nicht gelesen werden','error')
         reader.readAsDataURL(file)
@@ -941,21 +864,18 @@ export default function App() {
 
   const onFile = (e,type)=>{ const f=e.target.files[0]; if(f) handleFile(f,type); e.target.value='' }
 
-  // ── Tier filter toggle ──────────────────────────────────────────────
   const toggleTier = id => {
     setTierFilter(prev => {
       const allIds = new Set(visibleTiers.map(t=>t.id))
-      const base   = prev ?? new Set(allIds)   // null → all selected
+      const base   = prev ?? new Set(allIds)
       const next   = new Set(base)
       next.has(id) ? next.delete(id) : next.add(id)
-      // If everything is selected again → back to null (cleaner)
       if([...allIds].every(i=>next.has(i))) return null
       return next
     })
   }
-  // ── Edit mode helpers ──────────────────────────────────────────────────
+
   const startEdit = useCallback(rad => {
-    // Find index in radiation array
     setRadiation(prev => {
       const idx = prev.findIndex(r => r === rad || (r.name===rad.name && r.pos.x===rad.pos.x && r.pos.z===rad.pos.z))
       setEditMode({ idx, draft: { ...rad, pos:{...rad.pos} } })
@@ -969,7 +889,6 @@ export default function App() {
     setEditMode(prev => {
       if(!prev) return null
       const d = { ...prev.draft, ...patch }
-      // Recalculate rt when intensity changes
       if(patch.intensityMax !== undefined || patch.intensityMin !== undefined) {
         d.rt = radTier(d.intensityMax)
       }
@@ -991,12 +910,9 @@ export default function App() {
   const exportRadiation = useCallback(() => {
     const exportArr = radiation.map(r => {
       const raw = {...(r.raw||{})}
-      // Update fields in raw with current values
       const posStr = `${r.pos.x.toFixed(6)} 0 ${r.pos.z.toFixed(6)}`
-      // Determine which position key the original used
       const posKey = Object.keys(raw).find(k=>['radiationcenter','radiationCenter','center','position'].includes(k.toLowerCase())) || 'radiationCenter'
       raw[posKey] = posStr
-      // Update radius — use same key as original
       const radKey = Object.keys(raw).find(k=>['triggerradius','triggerRadius','radius','radiationradius','radiationRadius'].includes(k.toLowerCase())) || 'triggerRadius'
       raw[radKey] = r.radius
       raw.intensityMin = r.intensityMin
@@ -1009,7 +925,6 @@ export default function App() {
     showToast('JSON exportiert')
   },[radiation, showToast])
 
-  // ── Zone edit helpers ─────────────────────────────────────────────────
   const startZoneEdit = useCallback(zone => {
     setZones(prev => {
       const idx = prev.findIndex(z => z.name===zone.name && z.pos.x===zone.pos.x && z.pos.z===zone.pos.z)
@@ -1060,7 +975,6 @@ export default function App() {
     showToast('Zones.json exportiert')
   },[zones,showToast])
 
-  // ── Add radiation zone at world position ───────────────────────────────
   const addRadiationZone = useCallback((wx,wz) => {
     const auto = `RadZone_${String(radiation.length+1).padStart(3,'0')}`
     const newRad = {
@@ -1080,7 +994,6 @@ export default function App() {
     }
     setRadiation(prev => {
       const next = [...prev, newRad]
-      // Open edit mode for the new zone immediately
       setEditMode({ idx: next.length-1, draft:{...newRad, pos:{...newRad.pos}} })
       setSections(s=>({...s,info:true}))
       return next
@@ -1130,9 +1043,6 @@ export default function App() {
     return c
   },[zones,tierFilter,totalSpawnPoints])
 
-  // ──────────────────────────────────────────────────────────────────
-  // RENDER
-  // ──────────────────────────────────────────────────────────────────
   return (
     <div style={S.root}>
 
@@ -1147,7 +1057,7 @@ export default function App() {
         <div style={S.sideBlock}>
           <Lbl>Import</Lbl>
           {[
-            {label:'Karte (PNG/JPG)',  type:'map',       accept:'image/*',   loaded:!!mapImg},
+            {label:'Karte (PNG/JPG)',   type:'map',       accept:'image/*',   loaded:!!mapImg},
             {label:'Zones.json',       type:'zones',      accept:'.json',     loaded:zones.length>0},
             {label:'Tiers.json',       type:'tiers',      accept:'.json',     loaded:Object.keys(tiers).length>0},
             {label:'RadiationZones',   type:'radiation',  accept:'.json',     loaded:radiation.length>0},
@@ -1171,7 +1081,7 @@ export default function App() {
           <TBtn active={tool==='pan'}    onClick={()=>setTool('pan')}>✋ Pan</TBtn>
           <TBtn active={tool==='select'} onClick={()=>setTool('select')}>⬚ Auswahl</TBtn>
         </div>
-        {/* Unsaved edit indicator */}
+
         {(editMode||zoneEdit)&&(
           <div style={{padding:'3px 12px',background:'rgba(249,115,22,0.1)',borderBottom:'1px solid rgba(249,115,22,0.3)',fontSize:9,color:'#f97316',letterSpacing:1,display:'flex',alignItems:'center',gap:5}}>
             <span>●</span><span>Ungespeicherte Änderungen</span>
@@ -1187,7 +1097,7 @@ export default function App() {
         {/* Scroll body */}
         <div style={S.scroll}>
 
-          {/* ── Edit Mode Panel ── */}
+          {/* Edit Mode Panel */}
           {editMode&&(()=>{
             const d = editMode.draft
             const c = d.rt.color
@@ -1220,7 +1130,7 @@ export default function App() {
                   <div style={{marginBottom:10}}>
                     <div style={{fontSize:9,color:'#3d4a5e',letterSpacing:1,marginBottom:6}}>INTENSITÄT (mSv)</div>
                     {[['Min',d.intensityMin,'intensityMin'],['Max',d.intensityMax,'intensityMax']].map(([lbl,val,key])=>(
-                      <div key={key} style={{display:'flex',alignItems:'center',gap:5,marginBottom:5}}>
+                      <div key={key} style={{display:'align-items',alignItems:'center',gap:5,marginBottom:5}}>
                         <span style={{fontSize:9,color:'#3d4a5e',minWidth:24}}>{lbl}</span>
                         <button onClick={()=>updateDraft({[key]:Math.max(0,val-10)})}
                           style={{width:22,height:22,background:'#0f1521',border:'1px solid #1a2030',color:'#4a5568',cursor:'pointer',borderRadius:2,fontFamily:'monospace',fontSize:13,lineHeight:1,padding:0}}>−</button>
@@ -1248,7 +1158,7 @@ export default function App() {
             )
           })()}
 
-          {/* ── Zone Edit Panel ── */}
+          {/* Zone Edit Panel */}
           {zoneEdit&&(()=>{
             const d=zoneEdit.draft
             return (
@@ -1265,7 +1175,6 @@ export default function App() {
                     <div style={{fontSize:9,color:'#3d4a5e'}}>X: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.x.toFixed(1)}</span></div>
                     <div style={{fontSize:9,color:'#3d4a5e'}}>Z: <span style={{color:'#7a9ab0',fontFamily:'monospace'}}>{d.pos.z.toFixed(1)}</span></div>
                   </div>
-                  {/* Trigger radius slider */}
                   {[
                     {key:'triggerRadius',  label:'TRIGGER-RADIUS',  val:d.triggerRadius,  min:1,  max:500,  step:1,  col:'#94a3b8'},
                     {key:'despawnDistance',label:'DESPAWN-RADIUS',  val:d.despawnDistance,min:10, max:2000, step:10, col:'#facc15'},
@@ -1296,7 +1205,7 @@ export default function App() {
             )
           })()}
 
-          {/* Info Panel — renders for zone / radiation / anomaly */}
+          {/* Info Panel */}
           {inspected&&(()=>{
             const {type,data:d} = inspected
             const typeLabel = type==='zone'?'🧟 Spawn-Zone':type==='radiation'?'☢️ Radiation':type==='statAnom'?'⚡ Statische Anomalie':type==='dynAnom'?'⚡ Dynamisches Feld':'⚡ Teleport'
@@ -1309,7 +1218,6 @@ export default function App() {
                   <IRow label="Position" val={`${pos.x.toFixed(1)} 0 ${pos.z.toFixed(1)}`}/>
                 </>}
 
-                {/* Spawn Zone */}
                 {type==='zone'&&<>
                   <IRow label="TriggerR"    val={`${d.triggerRadius} m`}/>
                   <IRow label="DespawnR"    val={`${d.despawnDistance} m`}/>
@@ -1340,9 +1248,8 @@ export default function App() {
                   </>}
                 </>}
 
-                {/* Radiation Zone */}
                 {type==='radiation'&&<>
-                  <IRow label="Radius"      val={`${d.radius} m`}/>
+                  <IRow label="Radius"        val={`${d.radius} m`}/>
                   <IRow label="Min Intensität" val={`${d.intensityMin} mSv`}/>
                   <IRow label="Max Intensität" val={`${d.intensityMax} mSv`}/>
                   <IRow label="Stufe"       val={d.rt?.label||'–'} />
@@ -1354,13 +1261,11 @@ export default function App() {
                   </button>
                 </>}
 
-                {/* Static Anomaly */}
                 {type==='statAnom'&&<>
                   <IRow label="Name"       val={d.anomalyName||'–'}/>
                   <IRow label="Positionen" val={(d.anomalyPosition||[]).length}/>
                 </>}
 
-                {/* Dynamic Anomaly Field */}
                 {type==='dynAnom'&&<>
                   <IRow label="Typ"       val={d.zoneType||'–'}/>
                   <IRow label="Radius"    val={`${d.zoneRadius||150} m`}/>
@@ -1374,7 +1279,6 @@ export default function App() {
                   </div>}
                 </>}
 
-                {/* Teleport */}
                 {type==='teleport'&&<>
                   <IRow label="Typ"   val={d.teleportType===1?'Einzel':'Multi'}/>
                   <IRow label="Ziele" val={(d.teleportToPositions||[]).length}/>
@@ -1397,7 +1301,6 @@ export default function App() {
             <Tog label="Spawn-Radius"    on={layers.spawnRadius}    onChange={()=>toggleLayer('spawnRadius')}    col="#f97316"/>
             <Tog label="Zonen-Namen"     on={layers.zoneNames}      onChange={()=>toggleLayer('zoneNames')}      col="#c4b5fd"/>
 
-            {/* Tier filter */}
             {visibleTiers.length>0&&<>
               <div style={S.miniLbl}>Tier-Filter</div>
               <div style={{display:'flex',gap:4,marginBottom:6}}>
@@ -1531,7 +1434,7 @@ export default function App() {
         <div style={S.zoomHud}>{zoomPct}%</div>
         <button onClick={centerMap} style={S.centerBtn} title="Zentrieren">⊡</button>
 
-        {/* Shift+LMB context menu */}
+        {/* Context Menu */}
         {ctxMenu&&(
           <div style={{position:'absolute',top:ctxMenu.cy+8,left:ctxMenu.cx+8,background:'#0c1118',border:'1px solid #1a2030',borderRadius:5,overflow:'hidden',zIndex:50,minWidth:180,boxShadow:'0 4px 20px rgba(0,0,0,0.7)'}}>
             <div style={{padding:'5px 10px',fontSize:9,color:'#2a3040',borderBottom:'1px solid #0d1521',letterSpacing:1}}>
@@ -1561,7 +1464,6 @@ export default function App() {
             </div>
           </div>
         )}
-        {/* Click away to close context menu */}
         {ctxMenu&&<div style={{position:'absolute',inset:0,zIndex:49}} onClick={()=>setCtxMenu(null)}/>}
 
         {!mapImg&&(
@@ -1653,7 +1555,6 @@ const S={
   toast:    {position:'absolute',top:14,left:'50%',transform:'translateX(-50%)',color:'#000',padding:'5px 18px',borderRadius:4,fontSize:11,fontWeight:700,fontFamily:'monospace',letterSpacing:.5,whiteSpace:'nowrap',zIndex:99},
 }
 
-
 // ═══════════════════════════════════════════════════════════════════════
 // ANOMALY ARTIFACT EDITOR
 // ═══════════════════════════════════════════════════════════════════════
@@ -1704,22 +1605,47 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
     ArtefactsData: (anomaly.ArtefactsWithDetector?.ArtefactsData || []).map(a => ({...a})),
   }))
 
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+
   const name = isDyn ? (anomaly.zoneType || 'Dynamische Zone') : (anomaly.anomalyName || 'Anomalie')
 
   // ── Dynamic helpers
-  const setDynChance  = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, SpawnChancePercent:v}}))
-  const setDynName    = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, anomalyName:v}))
-  const setDynCount   = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, anomalyCount:v}))
-  const updateDynArt  = (ei, ai, f, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData: e.ArtefactsWithDetector.ArtefactsData.map((a,j) => j!==ai ? a : {...a,[f]:v})}}))
-  const addDynArt     = ei  => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:[...e.ArtefactsWithDetector.ArtefactsData,{ArtefactClassName:ARTEFACT_CLASSES[0],ArtefactSpawnChancePercent:100}]}}))
-  const removeDynArt  = (ei, ai) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:e.ArtefactsWithDetector.ArtefactsData.filter((_,j)=>j!==ai)}}))
-  const addDynEntry   = () => setDynEntries(p => [...p, {
+  const setDynChance   = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, SpawnChancePercent:v}}))
+  const setDynName     = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, anomalyName:v}))
+  const setDynCount    = (ei, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, anomalyCount:v}))
+  const updateDynArt   = (ei, ai, f, v) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData: e.ArtefactsWithDetector.ArtefactsData.map((a,j) => j!==ai ? a : {...a,[f]:v})}}))
+  const addDynArt      = ei  => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:[...e.ArtefactsWithDetector.ArtefactsData,{ArtefactClassName:ARTEFACT_CLASSES[0],ArtefactSpawnChancePercent:100}]}}))
+  const removeDynArt   = (ei, ai) => setDynEntries(p => p.map((e,i) => i!==ei ? e : {...e, ArtefactsWithDetector:{...e.ArtefactsWithDetector, ArtefactsData:e.ArtefactsWithDetector.ArtefactsData.filter((_,j)=>j!==ai)}}))
+  const addDynEntry    = () => setDynEntries(p => [...p, {
     anomalyName: ANOMALY_NAMES[0],
     anomalyCount: 1,
     ArtefactsWithDetector: { SpawnChancePercent: 0, ArtefactsData: [] },
     ArtefactsWithoutDetector: { SpawnChancePercent: 0, ArtefactsData: [] },
   }])
   const removeDynEntry = ei => setDynEntries(p => p.filter((_,i) => i!==ei))
+
+  // ── Drag and Drop Handler für Artefakte kopieren
+  const handleDropOnDynEntry = (targetEi, e) => {
+    e.preventDefault()
+    setDragOverIndex(null)
+    const rawData = e.dataTransfer.getData("application/json")
+    if (!rawData) return
+    try {
+      const artObj = JSON.parse(rawData)
+      setDynEntries(p => p.map((entry, i) => {
+        if (i !== targetEi) return entry
+        return {
+          ...entry,
+          ArtefactsWithDetector: {
+            ...entry.ArtefactsWithDetector,
+            ArtefactsData: [...entry.ArtefactsWithDetector.ArtefactsData, artObj]
+          }
+        }
+      }))
+    } catch (err) {
+      console.error("Drop error", err)
+    }
+  }
 
   // ── Static/teleport helpers
   const updateArt = (idx, f, v) => setWithDetector(p => ({...p, ArtefactsData: p.ArtefactsData.map((a,i) => i!==idx ? a : {...a,[f]:v})}))
@@ -1728,7 +1654,6 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
 
   const handleSave = () => {
     if(isDyn){
-      // Use dynEntries directly (not anomaly.anomalyData) so new entries are included
       const newAnomalyData = dynEntries.map(e => ({
         anomalyName: e.anomalyName,
         anomalyCount: Number(e.anomalyCount)||1,
@@ -1756,7 +1681,6 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
   const btn     = (col='#f97316') => ({background:'none',border:`1px solid ${col}`,borderRadius:3,color:col,fontSize:10,fontFamily:'monospace',cursor:'pointer',padding:'4px 10px',letterSpacing:1})
   const ftr     = {padding:'10px 16px',borderTop:'1px solid #0d1521',display:'flex',justifyContent:'flex-end',gap:8}
 
-  // ── Reusable art list — defined inside but uses useCallback-stable handlers
   const ArtList = ({arts, chance, onChance, onUpdate, onAdd, onRemove}) => {
     const total = arts.reduce((s,a) => s+(Number(a.ArtefactSpawnChancePercent)||0), 0)
     const over  = total > 100
@@ -1767,7 +1691,8 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
           <NumInput value={chance} onCommit={onChance} style={inp({width:70})} />
         </div>
         {arts.length > 0 && (
-          <div style={{display:'grid',gridTemplateColumns:'1fr 70px 28px',gap:4,marginBottom:4}}>
+          <div style={{display:'grid',gridTemplateColumns:'20px 1fr 70px 28px',gap:4,marginBottom:4}}>
+            <span/>
             <span style={{fontSize:9,color:'#2a3040',letterSpacing:1}}>ARTEFAKT</span>
             <span style={{fontSize:9,color:over?'#ef4444':'#2a3040',letterSpacing:1,textAlign:'right'}}>
               {over ? `⚠ ${total}%` : 'CHANCE%'}
@@ -1776,7 +1701,21 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
           </div>
         )}
         {arts.map((art, i) => (
-          <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 70px 28px',gap:4,alignItems:'center',marginBottom:4}}>
+          <div 
+            key={i} 
+            style={{display:'grid',gridTemplateColumns:'20px 1fr 70px 28px',gap:4,alignItems:'center',marginBottom:4}}
+          >
+            {/* Drag Handle Icon */}
+            <div 
+              draggable 
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/json", JSON.stringify(art))
+              }}
+              title="Gedrückt halten und auf eine andere Anomalie ziehen, um zu kopieren"
+              style={{cursor:'grab',color:'#3d4a5e',fontSize:12,textAlign:'center',userSelect:'none'}}
+            >
+              ⣿
+            </div>
             <select
               value={art.ArtefactClassName}
               onChange={e => onUpdate(i,'ArtefactClassName',e.target.value)}
@@ -1795,6 +1734,7 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
       </>
     )
   }
+
   return (
     <div style={overlay} onClick={e => e.target===e.currentTarget && onCancel()}>
       <div style={modal}>
@@ -1819,36 +1759,57 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
                 <span style={{fontSize:10,color:'#5a6a7a',flex:1}}>Zone Radius (m)</span>
                 <NumInput value={zoneRadius} onCommit={v => setZoneRadius(String(v))} style={inp({width:80})} max={Infinity} />
               </div>
-              {dynEntries.map((entry, i) => (
-                <div key={i} style={{marginBottom:10,padding:'10px 12px',background:'#0c1018',borderRadius:4,border:'1px solid #0d1521'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                    <span style={{fontSize:9,color:'#2a3040',letterSpacing:1,minWidth:60}}>ANOMALIE</span>
-                    <select
-                      value={entry.anomalyName}
-                      onChange={e => setDynName(i, e.target.value)}
-                      style={sel({flex:1})}>
-                      {ANOMALY_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                    <span style={{fontSize:9,color:'#2a3040',marginLeft:4}}>×</span>
-                    <NumInput
-                      value={entry.anomalyCount}
-                      onCommit={v => setDynCount(i, v)}
-                      style={inp({width:44})}
-                      max={Infinity}
+              {dynEntries.map((entry, i) => {
+                const isOver = dragOverIndex === i
+                return (
+                  <div 
+                    key={i} 
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      if (dragOverIndex !== i) setDragOverIndex(i)
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverIndex === i) setDragOverIndex(null)
+                    }}
+                    onDrop={(e) => handleDropOnDynEntry(i, e)}
+                    style={{
+                      marginBottom:10,
+                      padding:'10px 12px',
+                      background: isOver ? 'rgba(34, 197, 94, 0.08)' : '#0c1018',
+                      borderRadius:4,
+                      border: isOver ? '1px dashed #22c55e' : '1px solid #0d1521',
+                      transition: 'border 0.15s, background 0.15s'
+                    }}
+                  >
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                      <span style={{fontSize:9,color:'#2a3040',letterSpacing:1,minWidth:60}}>ANOMALIE</span>
+                      <select
+                        value={entry.anomalyName}
+                        onChange={e => setDynName(i, e.target.value)}
+                        style={sel({flex:1})}>
+                        {ANOMALY_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                      <span style={{fontSize:9,color:'#2a3040',marginLeft:4}}>×</span>
+                      <NumInput
+                        value={entry.anomalyCount}
+                        onCommit={v => setDynCount(i, v)}
+                        style={inp({width:44})}
+                        max={Infinity}
+                      />
+                      <button onClick={() => removeDynEntry(i)}
+                        style={{background:'none',border:'1px solid #ef4444',borderRadius:3,color:'#ef4444',fontSize:11,cursor:'pointer',padding:'2px 6px',marginLeft:4,lineHeight:1}}>✕</button>
+                    </div>
+                    <ArtList
+                      arts={entry.ArtefactsWithDetector.ArtefactsData}
+                      chance={entry.ArtefactsWithDetector.SpawnChancePercent}
+                      onChance={v => setDynChance(i, v)}
+                      onUpdate={(ai,f,v) => updateDynArt(i,ai,f,v)}
+                      onAdd={() => addDynArt(i)}
+                      onRemove={ai => removeDynArt(i,ai)}
                     />
-                    <button onClick={() => removeDynEntry(i)}
-                      style={{background:'none',border:'1px solid #ef4444',borderRadius:3,color:'#ef4444',fontSize:11,cursor:'pointer',padding:'2px 6px',marginLeft:4,lineHeight:1}}>✕</button>
                   </div>
-                  <ArtList
-                    arts={entry.ArtefactsWithDetector.ArtefactsData}
-                    chance={entry.ArtefactsWithDetector.SpawnChancePercent}
-                    onChance={v => setDynChance(i, v)}
-                    onUpdate={(ai,f,v) => updateDynArt(i,ai,f,v)}
-                    onAdd={() => addDynArt(i)}
-                    onRemove={ai => removeDynArt(i,ai)}
-                  />
-                </div>
-              ))}
+                )
+              })}
               <button onClick={addDynEntry}
                 style={{width:'100%',padding:'7px',background:'none',border:'1px dashed #f59e0b',borderRadius:3,color:'#f59e0b',fontSize:10,cursor:'pointer',fontFamily:'monospace',letterSpacing:1,marginTop:4}}>
                 + Anomalie hinzufügen
@@ -1874,8 +1835,7 @@ function AnomalyArtifactEditor({ anomaly, type, onSave, onCancel }) {
     </div>
   )
 }
-// ── NumInput: uncontrolled number input that only commits on blur
-// Prevents focus loss on every keystroke when parent re-renders
+
 function NumInput({ value, onCommit, style, min=0, max=Infinity }) {
   const [local, setLocal] = useState(String(value ?? ''))
   const prev = useRef(value)
